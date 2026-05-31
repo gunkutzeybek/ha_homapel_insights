@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Laris Insights",
+        "description": "Opt in to proactive suggestions for your home. Your home's data is aggregated locally; only compact signals leave the house.",
+        "data": {
+          "api_key": "Unit API key",
+          "cloud_base_url": "Cloud endpoint",
+          "opt_in": "I consent to analyzing my home for proactive suggestions"
+        }
+      }
+    },
+    "error": {
+      "consent_required": "You must consent to enable Laris Insights."
+    },
+    "abort": {
+      "already_configured": "This unit is already configured."
+    }
+  },
+  "services": {
+    "upload_test_signal": {
+      "name": "Upload test signal",
+      "description": "Phase 0: craft and upload one candidate signal to verify the end-to-end loop."
+    }
+  }
+}

@@ -1,0 +1,24 @@
+upload_test_signal:
+  name: Upload test signal
+  description: >-
+    Phase 0 verification — craft and upload one candidate signal to the cloud and
+    deliver any returned suggestions as notifications.
+  fields:
+    type:
+      name: Signal type
+      description: Analyzer signal type (e.g. waste.left_on, automation.suggest).
+      example: waste.left_on
+      selector:
+        text:
+    entities:
+      name: Entities
+      description: Entities the signal is about.
+      example: '["light.hallway"]'
+      selector:
+        object:
+    evidence:
+      name: Evidence
+      description: Compact, pre-aggregated evidence dict.
+      example: '{"hours_on": 9}'
+      selector:
+        object:
