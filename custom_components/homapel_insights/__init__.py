@@ -18,8 +18,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from .analysis.energy_waste import EnergyWasteAnalyzer
 from .analysis.left_on import LeftOnAnalyzer
 from .analysis.models import Analyzer, CandidateSignalData
+from .analysis.on_while_away import OnWhileAwayAnalyzer
 from .analysis.privacy import apply_privacy
 from .analysis.recurring_manual import RecurringManualAnalyzer
 from .analysis.signal_id import deterministic_signal_id
@@ -48,7 +50,12 @@ _HISTORY_LOOKBACK = timedelta(days=14)
 
 
 def _build_analyzers() -> list[Analyzer]:
-    return [LeftOnAnalyzer(), RecurringManualAnalyzer()]
+    return [
+        LeftOnAnalyzer(),
+        RecurringManualAnalyzer(),
+        OnWhileAwayAnalyzer(),
+        EnergyWasteAnalyzer(),
+    ]
 
 
 def _run_analyzers(windows: list[EntityWindow]) -> list[CandidateSignalData]:

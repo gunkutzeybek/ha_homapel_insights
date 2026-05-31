@@ -40,6 +40,7 @@ class RecurringManualAnalyzer:
                     type="automation.suggest",
                     entities=[w.entity_id],
                     evidence={
+                        "domain": w.domain,
                         "pattern": "recurring_on",
                         "typical_hour": best_hour,
                         "days_observed": days_observed,

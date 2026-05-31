@@ -11,19 +11,38 @@ model), surfaced here as notifications.
 Design: [`../proactive_service/PROACTIVE_INSIGHTS_PLAN.md`](../proactive_service/PROACTIVE_INSIGHTS_PLAN.md)
 · Build plan: [`../proactive_service/plans/IMPLEMENTATION_PLAN.md`](../proactive_service/plans/IMPLEMENTATION_PLAN.md)
 
-## Status: Phase 0 (skeleton)
+## Status: Phase 2 (cross-domain analysis)
 
 - Config flow with **whole-home opt-in**, cloud endpoint, and the unit `api_key`.
-- `InsightsUploader` — Bearer-authed POST to `/v1/insights/signals`, parses
-  pending suggestions from the response.
-- `deliver_suggestions` — fires `persistent_notification` per suggestion.
+- Hourly poll: read recorder history → deterministic analyzers → privacy
+  minimization → upload candidate signals → deliver returned suggestions as
+  notifications. The LLM lives only in the cloud; the edge ships aggregated
+  signals, never raw telemetry.
+- `InsightsUploader` — Bearer-authed POST to `/v1/insights/signals` and
+  `/v1/insights/feedback`.
 - `homapel_insights.upload_test_signal` service — crafts + uploads one signal to
   verify the end-to-end loop.
 
-### Not yet (Phase 1)
-`collector.py` (recorder history), `rollup.py`, `analyzers/` (`left_on`,
-`recurring_manual`), `privacy.py`, `storage.py` (Store-backed cursor + dedupe),
-and actionable accept/reject notifications.
+### Collected domains & context
+- **On/off behaviour**: `light`, `switch`, `fan`, `climate`, `cover`,
+  `media_player`.
+- **Occupancy context**: a home-vs-away timeline from `person`/`device_tracker`,
+  used to tag each on-event with an `away` flag (silent when no trackers exist).
+- **Energy context**: per-entity kWh totals from sibling energy sensors on the
+  same device.
+
+### Analyzers (all deterministic, HA-free, unit-tested)
+- `left_on` → `waste.left_on` (long/overnight on-stretch; lights, switches, fans,
+  climate, media players).
+- `recurring_manual` → `automation.suggest` (same manual action at the same hour
+  on ≥3 days).
+- `on_while_away` → `waste.on_while_away` (running while the home is empty).
+- `energy_waste` → `waste.energy` (kWh hogs; away energy raises priority).
+
+### Not yet
+Per-entity consent allow-list (Phase 3), entity/area-id anonymization,
+appliance-health anomaly analyzers (washer/litter numeric trends), and
+actionable accept/reject notifications.
 
 ## Install via HACS
 
@@ -41,9 +60,15 @@ the custom-repository step is no longer needed.
 Copy `custom_components/homapel_insights/` into your HA `config/custom_components/`,
 restart HA, then add the **Laris Insights** integration and opt in.
 
-## Verify Phase 0
+## Verify end-to-end
 
 1. Bring up `laris_insights` (cloud) pointed at the shared Postgres.
 2. Add this integration with a valid Pro unit `api_key` and the cloud URL.
 3. Call `homapel_insights.upload_test_signal`; run the cloud synth worker; call
    the service again — a `persistent_notification` should appear.
+
+> **Note:** the cloud ingest must recognize the Phase 2 signal `type`s
+> (`waste.on_while_away`, `waste.energy`) and the new `domain`/`energy_kwh`
+> evidence keys. The wire envelope (`schema_version`) is unchanged — only the
+> set of `type` values and evidence fields grew, which the cloud can treat as
+> additive.
