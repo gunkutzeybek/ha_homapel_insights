@@ -6,7 +6,7 @@ shapes and `schema_version` are identical and must be versioned in lock-step.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .const import SCHEMA_VERSION
 
@@ -27,7 +27,7 @@ def build_candidate_signal(
         "signal_id": signal_id or str(uuid.uuid4()),
         "type": signal_type,
         "priority": priority,
-        "detected_at": (detected_at or datetime.now(timezone.utc)).isoformat(),
+        "detected_at": (detected_at or datetime.now(UTC)).isoformat(),
         "entities": entities,
         "evidence": evidence,
         "area_id": area_id,
