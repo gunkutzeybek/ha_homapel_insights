@@ -1,24 +1,36 @@
 upload_test_signal:
-  name: Upload test signal
+  name: Upload test observation
   description: >-
-    Phase 0 verification — craft and upload one candidate signal to the cloud and
-    deliver any returned suggestions as notifications.
+    End-to-end verification — craft and upload one synthetic ObservationWindow
+    (a device left on while away, with energy) to the cloud and deliver any
+    returned suggestions as notifications.
   fields:
-    type:
-      name: Signal type
-      description: Analyzer signal type (e.g. waste.left_on, automation.suggest).
-      example: waste.left_on
+    entity_id:
+      name: Entity
+      description: Entity the synthetic observation is about.
+      example: climate.salon
       selector:
         text:
-    entities:
-      name: Entities
-      description: Entities the signal is about.
-      example: '["light.hallway"]'
+    area_id:
+      name: Area
+      description: Optional area id for the observation.
+      example: salon
       selector:
-        object:
-    evidence:
-      name: Evidence
-      description: Compact, pre-aggregated evidence dict.
-      example: '{"hours_on": 9}'
+        text:
+    energy_kwh:
+      name: Energy (kWh)
+      description: Total energy to attach to the observation.
+      example: 3.2
       selector:
-        object:
+        number:
+          min: 0
+          step: 0.1
+          mode: box
+    duration_s:
+      name: On duration (seconds)
+      description: Length of the synthetic on-event (tagged manual + away).
+      example: 28800
+      selector:
+        number:
+          min: 0
+          mode: box

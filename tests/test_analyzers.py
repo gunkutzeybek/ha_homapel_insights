@@ -1,20 +1,22 @@
-"""Edge analyzer + rollup + privacy logic (HA-free)."""
+"""Edge collection/aggregation logic (HA-free): rollup, occupancy, observation
+projection onto the §6.1 wire shape, privacy minimization.
+
+There is no edge-side decision layer anymore — the cloud LLM decides, and the
+cloud owns dedup (one upserted row per entity). These tests cover the senses:
+collect → roll up → project → minimize.
+"""
 
 from datetime import UTC, datetime
 
-from analysis.energy_waste import EnergyWasteAnalyzer
-from analysis.left_on import LeftOnAnalyzer
-from analysis.models import CandidateSignalData, EntityWindow, OnEvent
+from analysis.models import EntityWindow, OnEvent
+from analysis.observation import on_event_to_wire, to_observation
 from analysis.occupancy import build_occupancy, merge_intervals
-from analysis.on_while_away import OnWhileAwayAnalyzer
-from analysis.privacy import apply_privacy, coarse_time_bucket
-from analysis.recurring_manual import RecurringManualAnalyzer
+from analysis.privacy import apply_privacy
 from analysis.rollup import StateSpan, build_windows
-from analysis.signal_id import deterministic_signal_id
 
 
-def _dt(day: int, hour: int) -> datetime:
-    return datetime(2026, 5, day, hour, 0, tzinfo=UTC)
+def _dt(day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 5, day, hour, minute, tzinfo=UTC)
 
 
 # ── rollup ──────────────────────────────────────────────────────────────────
@@ -30,77 +32,80 @@ def test_build_windows_keeps_only_on_spans() -> None:
     assert windows["switch.b"].domain == "switch"
 
 
-# ── left_on ───────────────────────────────────────────────────────────────────
-def test_left_on_fires_for_long_overnight_stretch() -> None:
+def test_build_windows_carries_manual_and_area() -> None:
+    spans = [StateSpan("light.a", "on", _dt(1, 8), _dt(1, 9), manual=False)]
+    windows = {w.entity_id: w for w in build_windows(spans, {"light.a": "salon"})}
+    assert windows["light.a"].area_id == "salon"
+    assert windows["light.a"].on_events[0].manual is False
+
+
+# ── observation projection (collector EntityWindow → §6.1 ObservationWindow) ──
+def test_on_event_to_wire_maps_all_fields() -> None:
+    wire = on_event_to_wire(OnEvent(start=_dt(1, 9, 30), duration_s=7200, manual=False, away=True))
+    assert wire == {
+        "start": _dt(1, 9, 30).isoformat(),
+        "duration_s": 7200,
+        "manual": False,
+        "away": True,
+    }
+
+
+def test_to_observation_is_a_straight_field_mapping() -> None:
     window = EntityWindow(
-        "light.porch", "light", [OnEvent(start=_dt(1, 23), duration_s=8 * 3600)]
+        entity_id="climate.salon",
+        domain="climate",
+        on_events=[OnEvent(start=_dt(1, 23), duration_s=8 * 3600, away=True)],
+        area_id="salon",
+        energy_kwh=3.25,
     )
-    signals = LeftOnAnalyzer(min_hours=6).analyze([window])
-    assert len(signals) == 1
-    assert signals[0].type == "waste.left_on"
-    assert signals[0].priority == "high"  # overnight
-    assert signals[0].evidence["overnight"] is True
-    assert signals[0].evidence["hours_on"] == 8.0
+    obs = to_observation(window)
+
+    # No id, no timestamps, no presence flag — the cloud owns dedup; envelope owns
+    # window bounds + had_presence_data.
+    assert "observation_id" not in obs
+    assert obs["entity_id"] == "climate.salon"
+    assert obs["domain"] == "climate"
+    assert obs["area_id"] == "salon"
+    assert obs["energy_kwh"] == 3.25  # carried verbatim — no threshold, no verdict
+    assert len(obs["on_events"]) == 1
+    assert obs["on_events"][0]["away"] is True
+    assert obs["on_events"][0]["duration_s"] == 8 * 3600
 
 
-def test_left_on_ignores_short_and_other_domains() -> None:
-    short = EntityWindow("light.x", "light", [OnEvent(_dt(1, 10), 3600)])
-    sensor = EntityWindow("sensor.y", "sensor", [OnEvent(_dt(1, 1), 9 * 3600)])
-    cover = EntityWindow("cover.shutter", "cover", [OnEvent(_dt(1, 1), 9 * 3600)])
-    assert LeftOnAnalyzer(min_hours=6).analyze([short, sensor, cover]) == []
+def test_to_observation_keeps_null_energy_and_empty_events() -> None:
+    obs = to_observation(EntityWindow("light.b", "light"))
+    assert obs["energy_kwh"] is None
+    assert obs["area_id"] is None
+    assert obs["on_events"] == []
 
 
-def test_left_on_covers_climate_and_media_and_reports_domain_energy() -> None:
-    tv = EntityWindow(
-        "media_player.salon", "media_player", [OnEvent(_dt(1, 23), 7 * 3600)],
-        energy_kwh=2.345,
+# ── privacy minimization ──────────────────────────────────────────────────────
+def test_privacy_coarsens_on_event_start_to_the_hour() -> None:
+    obs = to_observation(
+        EntityWindow("light.living", "light", [OnEvent(_dt(1, 19, 42), 1800)])
     )
-    ac = EntityWindow("climate.salon", "climate", [OnEvent(_dt(1, 12), 8 * 3600)])
-    signals = {s.entities[0]: s for s in LeftOnAnalyzer(min_hours=6).analyze([tv, ac])}
-    assert signals["media_player.salon"].evidence["domain"] == "media_player"
-    assert signals["media_player.salon"].evidence["energy_kwh"] == 2.35
-    assert signals["climate.salon"].evidence["domain"] == "climate"
+    [out] = apply_privacy([obs])
+    # minute/second precision dropped; floored to 19:00.
+    assert out["on_events"][0]["start"] == _dt(1, 19).isoformat()
 
 
-# ── recurring_manual ──────────────────────────────────────────────────────────
-def test_recurring_manual_fires_on_repeated_daily_hour() -> None:
-    events = [OnEvent(start=_dt(day, 19), duration_s=1800) for day in (1, 2, 3, 4)]
-    window = EntityWindow("light.living", "light", events)
-    signals = RecurringManualAnalyzer(min_days=3).analyze([window])
-    assert len(signals) == 1
-    assert signals[0].type == "automation.suggest"
-    assert signals[0].evidence["days_observed"] == 4
-    assert signals[0].evidence["typical_hour"] == 19
+def test_privacy_enforces_consent_allow_list() -> None:
+    living = to_observation(EntityWindow("light.living", "light", [OnEvent(_dt(1, 19), 60)]))
+    bedroom = to_observation(EntityWindow("light.bedroom", "light", [OnEvent(_dt(1, 22), 60)]))
+
+    # whole-home opt-in (None) → everything passes through
+    assert len(apply_privacy([living, bedroom])) == 2
+
+    # per-entity consent → only the allowed entity survives
+    kept = apply_privacy([living, bedroom], allowed_entities={"light.living"})
+    assert [o["entity_id"] for o in kept] == ["light.living"]
 
 
-def test_recurring_manual_needs_min_days_and_ignores_automated() -> None:
-    too_few = EntityWindow("light.a", "light", [OnEvent(_dt(1, 19), 60), OnEvent(_dt(2, 19), 60)])
-    automated = EntityWindow(
-        "light.b", "light", [OnEvent(_dt(d, 7), 60, manual=False) for d in (1, 2, 3, 4)]
-    )
-    assert RecurringManualAnalyzer(min_days=3).analyze([too_few, automated]) == []
-
-
-# ── privacy ───────────────────────────────────────────────────────────────────
-def test_privacy_coarsens_hour_and_enforces_consent() -> None:
-    sig = CandidateSignalData(
-        type="automation.suggest",
-        entities=["light.living"],
-        evidence={"typical_hour": 19, "days_observed": 4},
-    )
-    out = apply_privacy([sig])
-    assert "typical_hour" not in out[0].evidence
-    assert out[0].evidence["typical_time"] == "evening"
-
-    # consent allow-list drops non-consented entities
-    assert apply_privacy([sig], allowed_entities={"light.other"}) == []
-
-
-def test_coarse_time_buckets() -> None:
-    assert coarse_time_bucket(8) == "morning"
-    assert coarse_time_bucket(14) == "afternoon"
-    assert coarse_time_bucket(20) == "evening"
-    assert coarse_time_bucket(2) == "night"
+def test_privacy_does_not_mutate_input() -> None:
+    obs = to_observation(EntityWindow("light.a", "light", [OnEvent(_dt(1, 19, 42), 60)]))
+    original_start = obs["on_events"][0]["start"]
+    apply_privacy([obs])
+    assert obs["on_events"][0]["start"] == original_start  # input untouched
 
 
 # ── occupancy ─────────────────────────────────────────────────────────────────
@@ -117,55 +122,11 @@ def test_occupancy_away_fraction_and_no_data_assumes_home() -> None:
     assert tl.away_fraction(_dt(1, 9), _dt(1, 11)) == 0.5
     assert tl.is_away(_dt(1, 10), _dt(1, 12)) is True  # fully away
     assert tl.is_away(_dt(1, 8), _dt(1, 10)) is False  # fully home
+    assert tl.has_data is True
 
-    # No presence data → never away (conservative).
+    # No presence data → never away (conservative), and has_data is reported so
+    # the cloud knows absent "away" tags mean "unknown", not "was home".
     empty = build_occupancy([], has_data=False)
+    assert empty.has_data is False
     assert empty.away_fraction(_dt(1, 0), _dt(1, 23)) == 0.0
     assert empty.is_away(_dt(1, 0), _dt(1, 23)) is False
-
-
-# ── on_while_away ─────────────────────────────────────────────────────────────
-def test_on_while_away_fires_only_for_away_events() -> None:
-    w = EntityWindow(
-        "switch.garden", "switch",
-        [OnEvent(_dt(1, 9), 2 * 3600, away=True), OnEvent(_dt(2, 9), 2 * 3600, away=False)],
-        area_id="garden", energy_kwh=1.2,
-    )
-    signals = OnWhileAwayAnalyzer(min_minutes=30).analyze([w])
-    assert len(signals) == 1
-    assert signals[0].type == "waste.on_while_away"
-    assert signals[0].priority == "high"
-    assert signals[0].evidence["occurrences"] == 1
-    assert signals[0].evidence["hours_on_while_away"] == 2.0
-    assert signals[0].evidence["energy_kwh"] == 1.2
-
-
-def test_on_while_away_silent_without_away_events() -> None:
-    w = EntityWindow("light.a", "light", [OnEvent(_dt(1, 9), 5 * 3600, away=False)])
-    assert OnWhileAwayAnalyzer().analyze([w]) == []
-
-
-# ── energy_waste ──────────────────────────────────────────────────────────────
-def test_energy_waste_thresholds_and_away_priority() -> None:
-    low = EntityWindow("switch.a", "switch", [OnEvent(_dt(1, 9), 3600)], energy_kwh=0.4)
-    no_energy = EntityWindow("light.b", "light", [OnEvent(_dt(1, 9), 3600)])
-    away = EntityWindow(
-        "switch.heater", "switch",
-        [OnEvent(_dt(1, 9), 3600, away=True), OnEvent(_dt(2, 9), 3600, away=False)],
-        energy_kwh=5.0,
-    )
-    signals = EnergyWasteAnalyzer(min_kwh=1.0).analyze([low, no_energy, away])
-    assert len(signals) == 1
-    assert signals[0].type == "waste.energy"
-    assert signals[0].evidence["energy_kwh"] == 5.0
-    assert signals[0].evidence["away_fraction"] == 0.5
-    assert signals[0].priority == "high"
-
-
-# ── deterministic signal id ───────────────────────────────────────────────────
-def test_signal_id_stable_and_period_sensitive() -> None:
-    a = deterministic_signal_id("unit", "waste.left_on", ["light.a", "light.b"], "2026-W22")
-    b = deterministic_signal_id("unit", "waste.left_on", ["light.b", "light.a"], "2026-W22")
-    c = deterministic_signal_id("unit", "waste.left_on", ["light.a", "light.b"], "2026-W23")
-    assert a == b  # order-independent, same period
-    assert a != c  # new period → new id

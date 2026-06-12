@@ -1,8 +1,8 @@
 """HA Store wrapper: last-run cursor + queued feedback (HA-coupled).
 
-Cloud dedupe is handled by deterministic signal ids, so this keeps only the
-small local state the edge owns: when we last ran, and feedback actions awaiting
-the next upload poll.
+Cloud dedupe is handled cloud-side (one upserted row per entity), so this keeps
+only the small local state the edge owns: when we last ran, and feedback actions
+awaiting the next upload poll.
 """
 
 from __future__ import annotations
@@ -22,7 +22,11 @@ _STORAGE_VERSION = 1
 class InsightsStore:
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store: Store = Store(hass, _STORAGE_VERSION, f"{DOMAIN}.{entry_id}")
-        self._data: dict[str, Any] = {"feedback_queue": [], "last_run": None}
+        self._data: dict[str, Any] = {
+            "feedback_queue": [],
+            "last_run": None,
+            "pending_actions": {},
+        }
 
     async def load(self) -> None:
         stored = await self._store.async_load()
@@ -30,6 +34,7 @@ class InsightsStore:
             self._data = stored
         self._data.setdefault("feedback_queue", [])
         self._data.setdefault("last_run", None)
+        self._data.setdefault("pending_actions", {})
 
     async def save(self) -> None:
         await self._store.async_save(self._data)
@@ -41,6 +46,15 @@ class InsightsStore:
         queued = list(self._data["feedback_queue"])
         self._data["feedback_queue"] = []
         return queued
+
+    def stash_action(self, suggestion_id: str, kind: str, draft: dict | None) -> None:
+        """Remember a delivered suggestion's action so we can run it when the
+        user later taps Accept (the notification event carries only the id)."""
+        self._data["pending_actions"][suggestion_id] = {"kind": kind, "draft": draft}
+
+    def pop_action(self, suggestion_id: str) -> dict | None:
+        """Take the stashed action for a suggestion (removing it)."""
+        return self._data["pending_actions"].pop(suggestion_id, None)
 
     @property
     def last_run(self) -> str | None:

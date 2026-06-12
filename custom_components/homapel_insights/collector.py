@@ -2,7 +2,7 @@
 
 Reads significant state history for the analyzed domains and reconstructs
 `StateSpan`s, then hands them to the pure rollup. Also builds two context
-streams the analyzers consume:
+streams shipped with each observation so the cloud LLM can reason about them:
 
 * an occupancy timeline (from `person`/`device_tracker` history) → each on-event
   is tagged `away` when the home was empty for the majority of its span;
@@ -15,7 +15,8 @@ a later safety allowlist.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.components.recorder import get_instance
@@ -31,6 +32,21 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant, State
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class CollectionResult:
+    """One tick's collected observations plus the context the cloud needs.
+
+    `window_start`/`window_end` bound the lookback this tick covered.
+    `had_presence_data` is the OccupancyTimeline's `has_data` — whether any
+    presence history existed, so the cloud can read absent "away" tags correctly.
+    """
+
+    windows: list[EntityWindow] = field(default_factory=list)
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    had_presence_data: bool = False
 
 # Domains the analyzers care about. Energy/power live in `sensor` and are pulled
 # separately as a context stream (see _collect_energy).
@@ -180,18 +196,19 @@ def _apply_context(
             )
 
 
-async def collect_windows(hass: HomeAssistant, lookback: timedelta) -> list[EntityWindow]:
+async def collect_windows(hass: HomeAssistant, lookback: timedelta) -> CollectionResult:
+    end = dt_util.utcnow()
+    start = end - lookback
+
     # Loop-side HA lookups (state machine + entity registry).
     entity_ids = _entities_in_domains(hass, ANALYZED_DOMAINS)
     if not entity_ids:
-        return []
+        return CollectionResult([], start, end, False)
     area_map = _area_map(hass, entity_ids)
     presence_ids = _entities_in_domains(hass, PRESENCE_DOMAINS)
     energy_scale = _energy_sensor_ids(hass)
     energy_map = _device_energy_map(hass, entity_ids, energy_scale)
 
-    end = dt_util.utcnow()
-    start = end - lookback
     history_ids = sorted(
         set(entity_ids)
         | set(presence_ids)
@@ -212,4 +229,4 @@ async def collect_windows(hass: HomeAssistant, lookback: timedelta) -> list[Enti
     occupancy = _build_occupancy(history, presence_ids, end)
     energy_by_entity = _collect_energy(history, energy_map, energy_scale)
     _apply_context(windows, occupancy, energy_by_entity)
-    return windows
+    return CollectionResult(windows, start, end, occupancy.has_data)

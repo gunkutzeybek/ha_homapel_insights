@@ -1,10 +1,14 @@
-"""Shared, HA-free data structures for the analysis layer."""
+"""Shared, HA-free data structures for the collection/aggregation layer.
+
+These are the edge's whole output surface: the collector builds EntityWindows
+from recorder history, and `analysis.observation` projects them straight onto the
+§6.1 wire shape. There is no edge-side decision layer — the cloud LLM decides.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
 
 
 @dataclass
@@ -39,20 +43,3 @@ class EntityWindow:
     on_events: list[OnEvent] = field(default_factory=list)
     area_id: str | None = None
     energy_kwh: float | None = None
-
-
-@dataclass
-class CandidateSignalData:
-    """An analyzer's output — maps 1:1 to a §6.1 candidate signal body."""
-
-    type: str
-    entities: list[str]
-    evidence: dict[str, object]
-    priority: str = "normal"
-    area_id: str | None = None
-
-
-class Analyzer(Protocol):
-    name: str
-
-    def analyze(self, windows: list[EntityWindow]) -> list[CandidateSignalData]: ...
