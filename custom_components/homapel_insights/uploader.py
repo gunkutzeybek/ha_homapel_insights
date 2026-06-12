@@ -1,4 +1,4 @@
-"""Batched, signed upload of candidate signals to the cloud ingest API.
+"""Signed upload of aggregated observations to the cloud ingest API.
 
 Pull model: the POST response carries this unit's pending suggestions (decision
 #5), which the caller delivers as HA notifications. Phase 0 keeps retry/offline
@@ -11,8 +11,6 @@ import logging
 
 from aiohttp import ClientError, ClientSession
 
-from .contracts import build_upload_request
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -22,17 +20,17 @@ class InsightsUploader:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
 
-    async def upload(self, signals: list[dict]) -> list[dict]:
-        """POST signals; return the pending suggestions from the response.
+    async def upload(self, request: dict) -> list[dict]:
+        """POST an ObservationUploadRequest; return the response's pending suggestions.
 
-        Returns an empty list on any error (Phase 0 — failures are non-fatal and
-        retried on the next poll).
+        Returns an empty list on any error (failures are non-fatal and retried on
+        the next poll — the cloud re-analyzes a trailing window each tick).
         """
-        url = f"{self._base_url}/v1/insights/signals"
+        url = f"{self._base_url}/v1/insights/observations"
         headers = {"Authorization": f"Bearer {self._api_key}"}
         try:
             async with self._session.post(
-                url, json=build_upload_request(signals), headers=headers
+                url, json=request, headers=headers
             ) as resp:
                 if resp.status != 200:
                     _LOGGER.warning("insights upload failed: HTTP %s", resp.status)
