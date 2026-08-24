@@ -3,72 +3,91 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
 Home Assistant custom component — the edge half of the Laris proactive layer.
-Runs inside the user's HA, will collect + aggregate events locally, run
-**deterministic** analyzers, minimize for privacy, and upload compact candidate
-signals to the cloud. The cloud returns suggestions in the upload response (pull
-model), surfaced here as notifications.
+It runs inside your Home Assistant, reads recorder history on an hourly poll,
+aggregates it into per-entity **observation windows**, minimizes them for
+privacy, and uploads them to the Laris cloud. The cloud decides which
+suggestions are worth making and returns them in the upload response (pull
+model); this integration surfaces them as notifications you can accept or
+reject.
+
+The LLM lives **only** in the cloud. The edge ships aggregated observations —
+never raw telemetry, and never its own verdicts.
 
 Design: [`../proactive_service/PROACTIVE_INSIGHTS_PLAN.md`](../proactive_service/PROACTIVE_INSIGHTS_PLAN.md)
 · Build plan: [`../proactive_service/plans/IMPLEMENTATION_PLAN.md`](../proactive_service/plans/IMPLEMENTATION_PLAN.md)
 
-## Status: Phase 2 (cross-domain analysis)
+## Setup
 
-- Config flow with **whole-home opt-in**, cloud endpoint, and the unit `api_key`.
-- Hourly poll: read recorder history → deterministic analyzers → privacy
-  minimization → upload candidate signals → deliver returned suggestions as
-  notifications. The LLM lives only in the cloud; the edge ships aggregated
-  signals, never raw telemetry.
-- `InsightsUploader` — Bearer-authed POST to `/v1/insights/signals` and
-  `/v1/insights/feedback`.
-- `homapel_insights.upload_test_signal` service — crafts + uploads one signal to
-  verify the end-to-end loop.
+Laris Insights is included in the Laris subscription — there is no separate
+plan to buy. You need an API key from [laris.homapel.com](https://laris.homapel.com);
+it is the **same key** the Homapel Conversation (voice) integration uses.
 
-### Collected domains & context
+1. **Install.** In HACS, open the three-dot menu → **Custom repositories**, add
+   this repository with category **Integration**, download **Laris Insights**,
+   and restart Home Assistant.
+2. **Add the integration.** **Settings → Devices & Services → Add Integration →
+   Laris Insights**.
+3. **Paste your API key.** If you already set up Homapel Conversation, the key
+   is prefilled from it — just confirm. The key is checked against the Laris
+   cloud before the entry is created, so a wrong key is caught immediately
+   instead of failing silently an hour later.
+4. **Opt in.** Tick the whole-home consent box. Nothing about your home is
+   collected or uploaded without it.
+
+Suggestions start arriving as notifications once the cloud has seen enough
+history. Answer **Evet / Hayır** (Yes / No) on the notification: accepted
+actions run locally, and either answer is reported back so the cloud stops
+suggesting what you turn down.
+
+Once this repository is published to the
+[HACS default store](https://hacs.xyz/docs/publish/integration), the
+custom-repository step goes away.
+
+### When something needs your attention
+
+- **The key was rotated on the dashboard** → the integration asks you to paste
+  the new one (Settings → Devices & Services → *Reconfigure*).
+- **The subscription is not active** → a repair issue points you at the
+  dashboard. Uploads resume on their own once it is live again.
+- **Endpoints** (cloud addresses) can be changed from *Reconfigure* without
+  re-entering the key. Leave them alone unless Laris support says otherwise.
+
+## What is collected
+
 - **On/off behaviour**: `light`, `switch`, `fan`, `climate`, `cover`,
-  `media_player`.
-- **Occupancy context**: a home-vs-away timeline from `person`/`device_tracker`,
-  used to tag each on-event with an `away` flag (silent when no trackers exist).
+  `media_player` — aggregated into on-intervals, not raw state logs.
+- **Occupancy context**: a home-vs-away timeline built from `person` /
+  `device_tracker`, used only to tag each on-interval with an `away` flag
+  (silent when the home has no trackers).
 - **Energy context**: per-entity kWh totals from sibling energy sensors on the
   same device.
 
-### Analyzers (all deterministic, HA-free, unit-tested)
-- `left_on` → `waste.left_on` (long/overnight on-stretch; lights, switches, fans,
-  climate, media players).
-- `recurring_manual` → `automation.suggest` (same manual action at the same hour
-  on ≥3 days).
-- `on_while_away` → `waste.on_while_away` (running while the home is empty).
-- `energy_waste` → `waste.energy` (kWh hogs; away energy raises priority).
+Entity ids are the most specific thing that leaves the house. Per-entity and
+per-area consent is the planned next step; today consent is whole-home.
 
-### Not yet
-Per-entity consent allow-list (Phase 3), entity/area-id anonymization,
-appliance-health anomaly analyzers (washer/litter numeric trends), and
-actionable accept/reject notifications.
+## Wire contract
 
-## Install via HACS
+`schema_version: 2`, mirroring the cloud's `laris_insights/app/contracts.py`:
 
-1. In HACS, open the three-dot menu → **Custom repositories**.
-2. Add this repository's URL with category **Integration**.
-3. Search for **Laris Insights** in HACS, download it, and restart Home Assistant.
-4. Add the **Laris Insights** integration from **Settings → Devices & Services**
-   and opt in.
+- `POST /v1/insights/observations` — the aggregated observation windows; the
+  response carries this unit's pending suggestions.
+- `POST /v1/insights/feedback` — accepted / rejected / snoozed.
 
-Once the repository is published to the [HACS default store](https://hacs.xyz/docs/publish/integration),
-the custom-repository step is no longer needed.
+Both authenticate with `Authorization: Bearer <api_key>`.
 
 ## Install (dev / manual)
 
 Copy `custom_components/homapel_insights/` into your HA `config/custom_components/`,
-restart HA, then add the **Laris Insights** integration and opt in.
+restart HA, then add the **Laris Insights** integration.
+
+```bash
+pip install -e ".[test]"     # Home Assistant needs a POSIX host (WSL on Windows)
+ruff check . && pytest       # both must be green before committing
+```
 
 ## Verify end-to-end
 
 1. Bring up `laris_insights` (cloud) pointed at the shared Postgres.
-2. Add this integration with a valid Pro unit `api_key` and the cloud URL.
+2. Add this integration with a real unit `api_key` and the cloud URL.
 3. Call `homapel_insights.upload_test_signal`; run the cloud synth worker; call
-   the service again — a `persistent_notification` should appear.
-
-> **Note:** the cloud ingest must recognize the Phase 2 signal `type`s
-> (`waste.on_while_away`, `waste.energy`) and the new `domain`/`energy_kwh`
-> evidence keys. The wire envelope (`schema_version`) is unchanged — only the
-> set of `type` values and evidence fields grew, which the cloud can treat as
-> additive.
+   the service again — a notification should appear.

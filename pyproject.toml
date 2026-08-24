@@ -1,4 +1,28 @@
 # Tooling-only config for the edge integration (HA components aren't pip-installed).
+#
+# `pip install -e ".[test]"` installs the test extras; nothing is built — the
+# integration ships as custom_components/ via HACS.
+[project]
+name = "laris-insights-edge"
+version = "0.4.0"
+description = "Home Assistant custom integration - the edge half of the Laris proactive layer"
+requires-python = ">=3.13"
+
+[project.optional-dependencies]
+# pytest-homeassistant-custom-component pins the Home Assistant version
+# (0.13.316 -> HA 2026.2.3, Python 3.13).
+test = [
+  "pytest-homeassistant-custom-component==0.13.316",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
@@ -8,3 +32,8 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-p no:cacheprovider"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

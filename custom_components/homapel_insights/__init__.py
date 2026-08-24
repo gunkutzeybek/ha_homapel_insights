@@ -12,8 +12,11 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from aiohttp import ClientSession
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
@@ -28,11 +31,15 @@ from .const import (
     CONF_API_KEY,
     CONF_CLOUD_BASE_URL,
     CONF_OPT_IN,
+    CONF_UNIT_ID,
+    CONF_VOICE_API_BASE,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_VOICE_API_BASE,
     DOMAIN,
     EVENT_MOBILE_APP_NOTIFICATION_ACTION,
     FEEDBACK_ACCEPTED,
     FEEDBACK_REJECTED,
+    ISSUE_UNIT_NOT_ACTIVE,
     SERVICE_UPLOAD_TEST_SIGNAL,
 )
 from .contracts import build_observation_upload_request, build_observation_window
@@ -40,6 +47,7 @@ from .delivery import deliver_suggestions
 from .executor import execute_accepted_action
 from .storage import InsightsStore
 from .uploader import InsightsUploader
+from .voice_api import VoiceApiError, VoiceAuthError, async_get_unit_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,16 +57,51 @@ _LOGGER = logging.getLogger(__name__)
 _HISTORY_LOOKBACK = timedelta(days=14)
 
 
+async def _async_ensure_unit_id(
+    hass: HomeAssistant, entry: ConfigEntry, session: ClientSession
+) -> None:
+    """Backfill `unit_id` on entries created before the config flow stored it.
+
+    Those entries are keyed on the api_key itself, so rotating the key looked
+    like a brand-new unit (CLAUDE.md §6). One `/v1/units/status` call fixes both
+    the stored data and the unique_id; a key the cloud rejects hands the
+    customer the reauth flow instead of failing silently on the next poll.
+    """
+    if entry.data.get(CONF_UNIT_ID):
+        return
+
+    api_base = entry.data.get(CONF_VOICE_API_BASE, DEFAULT_VOICE_API_BASE)
+    try:
+        status = await async_get_unit_status(session, api_base, entry.data[CONF_API_KEY])
+    except VoiceAuthError as err:
+        raise ConfigEntryAuthFailed("the stored Laris API key was rejected") from err
+    except VoiceApiError as err:
+        raise ConfigEntryNotReady(f"cannot verify the Laris API key: {err}") from err
+
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_UNIT_ID: status.unit_id,
+            CONF_VOICE_API_BASE: api_base,
+        },
+        unique_id=status.unit_id,
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not entry.data.get(CONF_OPT_IN, False):
         _LOGGER.info("homapel_insights not opted in; skipping setup")
         return False
 
     session = async_get_clientsession(hass)
+    await _async_ensure_unit_id(hass, entry, session)
     uploader = InsightsUploader(
+        hass=hass,
         session=session,
         base_url=entry.data[CONF_CLOUD_BASE_URL],
         api_key=entry.data[CONF_API_KEY],
+        entry=entry,
     )
     store = InsightsStore(hass, entry.entry_id)
     await store.load()
@@ -167,6 +210,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, SERVICE_UPLOAD_TEST_SIGNAL, _upload_test_signal)
     _LOGGER.info("homapel_insights set up for entry %s", entry.entry_id)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the subscription repair issue with the entry that raised it."""
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_UNIT_NOT_ACTIVE}_{entry.entry_id}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -1,0 +1,72 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Laris Insights",
+        "description": "Laris evinizi yerelde analiz eder; buluta yalnızca özetlenmiş gözlemler gider ve hangi önerinin gösterileceğine bulut karar verir. Laris panelinizdeki API anahtarını yapıştırın ({dashboard_url}) — Homapel Conversation entegrasyonuna verdiğiniz anahtarın aynısı.",
+        "data": {
+          "api_key": "Laris API anahtarı",
+          "cloud_base_url": "Insights adresi",
+          "voice_api_base": "Laris bulut adresi",
+          "opt_in": "Proaktif öneriler için evimin analiz edilmesini onaylıyorum"
+        },
+        "data_description": {
+          "api_key": "Laris panelinizde görünür — Homapel Conversation entegrasyonundaki anahtarın aynısı. Parola gibi saklayın.",
+          "cloud_base_url": "Özetlenmiş gözlemlerin yüklendiği adres. Laris destek ekibi başka bir adres vermediyse varsayılanı bırakın.",
+          "voice_api_base": "API anahtarınızın doğrulandığı adres. Laris destek ekibi başka bir adres vermediyse varsayılanı bırakın."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Laris API anahtarınızı güncelleyin",
+        "description": "Laris kayıtlı API anahtarını kabul etmedi. Laris panelinizdeki güncel anahtarı yapıştırın ({dashboard_url}).",
+        "data": {
+          "api_key": "Laris API anahtarı"
+        },
+        "data_description": {
+          "api_key": "Bu evin şu anda kullandığı anahtar. Panelden yenilediğinizde eskisi geçersiz olur."
+        }
+      },
+      "reconfigure": {
+        "title": "Laris Insights adresleri",
+        "description": "Bu evin gözlemleri yüklediği ve API anahtarının doğrulandığı adresleri değiştirin. Laris destek ekibi başka adres vermediyse varsayılanları bırakın.",
+        "data": {
+          "cloud_base_url": "Insights adresi",
+          "voice_api_base": "Laris bulut adresi"
+        },
+        "data_description": {
+          "cloud_base_url": "Özetlenmiş gözlemlerin yüklendiği adres.",
+          "voice_api_base": "API anahtarınızın doğrulandığı adres."
+        }
+      }
+    },
+    "error": {
+      "consent_required": "Laris Insights'ı etkinleştirmek için onay vermelisiniz.",
+      "invalid_auth": "Bu API anahtarı tanınmadı. Laris panelinizden yeniden kopyalayın.",
+      "forbidden": "Laris aboneliğiniz etkin değil. Laris panelinden kontrol edip tekrar deneyin.",
+      "cannot_connect": "Laris buluta ulaşılamadı. Evinizin internet bağlantısını kontrol edip tekrar deneyin.",
+      "unknown": "API anahtarı doğrulanırken bir sorun oluştu. Lütfen tekrar deneyin."
+    },
+    "abort": {
+      "already_configured": "Bu ünite zaten yapılandırılmış.",
+      "unit_mismatch": "Bu API anahtarı başka bir Laris ünitesine ait.",
+      "reauth_successful": "API anahtarı güncellendi.",
+      "reconfigure_successful": "Adresler güncellendi."
+    }
+  },
+  "issues": {
+    "unit_not_active": {
+      "title": "Laris aboneliği etkin değil",
+      "description": "Bu ünitenin aboneliği etkin olmadığı için Laris Insights gözlem yükleyemiyor. Aboneliğinizi {dashboard_url} adresinden kontrol edin; abonelik etkinleştiğinde öneriler kendiliğinden geri gelir."
+    }
+  },
+  "common": {
+    "notification_accept": "Evet",
+    "notification_reject": "Hayır"
+  },
+  "services": {
+    "upload_test_signal": {
+      "name": "Test gözlemi yükle",
+      "description": "Uçtan uca döngüyü doğrulamak için tek bir sentetik gözlem oluşturup yükler."
+    }
+  }
+}
