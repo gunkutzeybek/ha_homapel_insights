@@ -16,15 +16,21 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
 
 from .const import (
     ACTION_PREFIX,
     ACTION_SEPARATOR,
     ACTIONABLE_KINDS,
     BTN_ACCEPT,
+    BTN_ACCEPT_FALLBACK,
+    BTN_ACCEPT_TRANSLATION_KEY,
     BTN_REJECT,
+    BTN_REJECT_FALLBACK,
+    BTN_REJECT_TRANSLATION_KEY,
     DOMAIN,
     KIND_RUN_ACTION,
+    TRANSLATION_CATEGORY_COMMON,
 )
 from .storage import InsightsStore
 
@@ -41,10 +47,23 @@ def _encode_action(verb: str, suggestion_id: str) -> str:
     return f"{ACTION_PREFIX}{verb}{ACTION_SEPARATOR}{suggestion_id}"
 
 
-def _build_actions(suggestion_id: str) -> list[dict]:
+async def _async_button_labels(hass: HomeAssistant) -> tuple[str, str]:
+    """Accept/Reject labels in the home's language (strings.json -> `common`)."""
+    translations = await async_get_translations(
+        hass, hass.config.language, TRANSLATION_CATEGORY_COMMON, {DOMAIN}
+    )
+    prefix = f"component.{DOMAIN}.{TRANSLATION_CATEGORY_COMMON}."
+    return (
+        translations.get(f"{prefix}{BTN_ACCEPT_TRANSLATION_KEY}", BTN_ACCEPT_FALLBACK),
+        translations.get(f"{prefix}{BTN_REJECT_TRANSLATION_KEY}", BTN_REJECT_FALLBACK),
+    )
+
+
+def _build_actions(suggestion_id: str, labels: tuple[str, str]) -> list[dict]:
+    accept, reject = labels
     return [
-        {"action": _encode_action(BTN_ACCEPT, suggestion_id), "title": "Evet"},
-        {"action": _encode_action(BTN_REJECT, suggestion_id), "title": "Hayır"},
+        {"action": _encode_action(BTN_ACCEPT, suggestion_id), "title": accept},
+        {"action": _encode_action(BTN_REJECT, suggestion_id), "title": reject},
     ]
 
 
@@ -65,6 +84,8 @@ async def deliver_suggestions(
         )
         return
 
+    labels = await _async_button_labels(hass)
+
     for s in suggestions:
         suggestion_id = s.get("suggestion_id", "unknown")
         action = s.get("action") or {}
@@ -82,7 +103,7 @@ async def deliver_suggestions(
                 else action.get("automation_draft")
             )
             store.stash_action(suggestion_id, kind, draft)
-            data["actions"] = _build_actions(suggestion_id)
+            data["actions"] = _build_actions(suggestion_id, labels)
 
         payload = {
             "title": s.get("title", "Laris"),

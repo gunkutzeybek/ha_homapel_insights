@@ -8,9 +8,35 @@ DOMAIN = "homapel_insights"
 CONF_CLOUD_BASE_URL = "cloud_base_url"
 CONF_API_KEY = "api_key"
 CONF_OPT_IN = "opt_in"
+# Where the key is validated (the voice backend, agentic_service) and the unit
+# id that validation returns — the entry's unique_id since v0.4.0.
+CONF_VOICE_API_BASE = "voice_api_base"
+CONF_UNIT_ID = "unit_id"
 
 # Phase 0 default cloud endpoint base. Override per-deployment in the config flow.
 DEFAULT_CLOUD_BASE_URL = "https://insights.api.homapel.com"
+
+# The Laris cloud API that owns units and api_keys. Same host the voice
+# integration talks to; `GET /v1/units/status` is the cheap key check the config
+# flow uses. Overridable per entry (staging installs).
+DEFAULT_VOICE_API_BASE = "https://api.homapel.com"
+# Seconds to wait for that check before calling it a connection failure.
+STATUS_TIMEOUT = 10
+
+# Where the customer buys the subscription and reads/rotates the API key.
+DASHBOARD_URL = "https://laris.homapel.com"
+
+# The voice integration (homapel.agentic_assistant). It stores the SAME api_key
+# under the same subscription, so the config flow offers to reuse it instead of
+# making the customer paste the key twice.
+VOICE_DOMAIN = "homapel_conversation"
+VOICE_CONF_API_KEY = "api_key"
+VOICE_CONF_API_BASE = "api_base"
+
+# Repair issue raised from the upload loop on a 403 — the subscription is not
+# live (suspended / dormant). A 401 has no issue of its own: it starts a reauth
+# flow, which HA already renders as a fixable repair.
+ISSUE_UNIT_NOT_ACTIVE = "unit_not_active"
 
 # Pull/upload cadence. Periodic-only for MVP (recommended in the plan); live
 # streaming is deferred to a later safety allowlist.
@@ -54,3 +80,12 @@ KIND_INFO_ONLY = "info_only"
 KIND_DISMISS = "dismiss"
 # Kinds that warrant Accept/Reject buttons and an execution on accept.
 ACTIONABLE_KINDS = frozenset({KIND_INSTALL_AUTOMATION, KIND_RUN_ACTION})
+
+# Notification button labels live in strings.json (`common`) so they follow the
+# customer's HA language instead of being hardcoded Turkish.
+TRANSLATION_CATEGORY_COMMON = "common"
+BTN_ACCEPT_TRANSLATION_KEY = "notification_accept"
+BTN_REJECT_TRANSLATION_KEY = "notification_reject"
+# Used only if the translation cache has nothing (never in a normal HA).
+BTN_ACCEPT_FALLBACK = "Evet"
+BTN_REJECT_FALLBACK = "Hayır"
